@@ -68,9 +68,8 @@ async function fetchInbox(card: string): Promise<InboxItem[]> {
   } catch { return []; }
 }
 
-// 自动更新: 插件开机比对服务器版本号, 有新版自动拉新代码。
+// 检查更新: 开机比对服务器版本, 有新版只提示+给下载链接(不下载/不执行远程代码, 符合 Obsidian 商店规范)。
 const PLUGIN_VER_API = "https://api.monoi.cn/nbp/plugin/version";
-const PLUGIN_FILE_API = "https://api.monoi.cn/nbp/plugin/file/";
 function isNewer(remote: string, cur: string): boolean {
   const pa = remote.split("."), pb = cur.split(".");
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
@@ -96,22 +95,14 @@ export default class NotebookPointPlugin extends Plugin {
     });
   }
 
-  // 开机检查更新: 比对服务器版本, 有新版自动下载新代码, 提示重启。
+  // 检查更新: 只提示有新版 + 给下载链接(不下载/不执行远程代码, 符合商店规范)。
   private async checkUpdate() {
     try {
       const r = await requestUrl({ url: PLUGIN_VER_API, throw: false });
       if (r.status !== 200) return;
       const remote = String(JSON.parse(r.text).version || "");
-      const dir = this.manifest.dir;
-      if (!remote || !dir || !isNewer(remote, this.manifest.version)) return;
-      const mj = await requestUrl({ url: PLUGIN_FILE_API + "main.js", throw: false });
-      if (mj.status !== 200 || !mj.text) return;
-      await this.app.vault.adapter.write(normalizePath(dir + "/main.js"), mj.text);
-      const mf = await requestUrl({ url: PLUGIN_FILE_API + "manifest.json", throw: false });
-      if (mf.status === 200 && mf.text) {
-        await this.app.vault.adapter.write(normalizePath(dir + "/manifest.json"), mf.text);
-      }
-      new Notice(`NotebookPoint 已更新到 v${remote},重启 Obsidian 生效 🎉`, 8000);
+      if (!remote || !isNewer(remote, this.manifest.version)) return;
+      new Notice(`NotebookPoint 有新版 v${remote}。到教程页下载更新:\nhttps://api.monoi.cn/nbp/guide`, 10000);
     } catch (e) {
       console.error("NotebookPoint 检查更新出错", e);
     }

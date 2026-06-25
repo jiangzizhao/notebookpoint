@@ -311,7 +311,6 @@ async function fetchInbox(card) {
   }
 }
 var PLUGIN_VER_API = "https://api.monoi.cn/nbp/plugin/version";
-var PLUGIN_FILE_API = "https://api.monoi.cn/nbp/plugin/file/";
 function isNewer(remote, cur) {
   const pa = remote.split("."), pb = cur.split(".");
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
@@ -338,25 +337,17 @@ var NotebookPointPlugin = class extends import_obsidian.Plugin {
       window.setTimeout(() => this.checkUpdate(), 6e3);
     });
   }
-  // 开机检查更新: 比对服务器版本, 有新版自动下载新代码, 提示重启。
+  // 检查更新: 只提示有新版 + 给下载链接(不下载/不执行远程代码, 符合商店规范)。
   async checkUpdate() {
     try {
       const r = await (0, import_obsidian.requestUrl)({ url: PLUGIN_VER_API, throw: false });
       if (r.status !== 200)
         return;
       const remote = String(JSON.parse(r.text).version || "");
-      const dir = this.manifest.dir;
-      if (!remote || !dir || !isNewer(remote, this.manifest.version))
+      if (!remote || !isNewer(remote, this.manifest.version))
         return;
-      const mj = await (0, import_obsidian.requestUrl)({ url: PLUGIN_FILE_API + "main.js", throw: false });
-      if (mj.status !== 200 || !mj.text)
-        return;
-      await this.app.vault.adapter.write((0, import_obsidian.normalizePath)(dir + "/main.js"), mj.text);
-      const mf = await (0, import_obsidian.requestUrl)({ url: PLUGIN_FILE_API + "manifest.json", throw: false });
-      if (mf.status === 200 && mf.text) {
-        await this.app.vault.adapter.write((0, import_obsidian.normalizePath)(dir + "/manifest.json"), mf.text);
-      }
-      new import_obsidian.Notice(`NotebookPoint \u5DF2\u66F4\u65B0\u5230 v${remote},\u91CD\u542F Obsidian \u751F\u6548 \u{1F389}`, 8e3);
+      new import_obsidian.Notice(`NotebookPoint \u6709\u65B0\u7248 v${remote}\u3002\u5230\u6559\u7A0B\u9875\u4E0B\u8F7D\u66F4\u65B0:
+https://api.monoi.cn/nbp/guide`, 1e4);
     } catch (e) {
       console.error("NotebookPoint \u68C0\u67E5\u66F4\u65B0\u51FA\u9519", e);
     }
