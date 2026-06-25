@@ -262,7 +262,6 @@ class NbpSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "NotebookPoint 设置" });
 
     const hint = containerEl.createEl("p", { cls: "nbp-hint" });
     hint.setText("公众号付费后会拿到一张卡密。① 把卡密填到下面;② 在微信里把同一张卡密发给「笔记同步助手」客服激活。之后你转发的文章、链接、资料就会自动同步进下面这个文件夹。");

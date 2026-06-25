@@ -1,9 +1,9 @@
 {
   "id": "notebookpoint",
   "name": "NotebookPoint",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "minAppVersion": "1.4.0",
-  "description": "在微信里把文章、链接、资料转发给客服,自动同步成 Obsidian 笔记。",
+  "description": "把你在微信里转发的文章、链接、资料,自动整理成 Markdown 笔记.",
   "author": "monoi",
   "authorUrl": "https://monoi.cn",
   "isDesktopOnly": true

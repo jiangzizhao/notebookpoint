@@ -518,7 +518,6 @@ var NbpSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "NotebookPoint \u8BBE\u7F6E" });
     const hint = containerEl.createEl("p", { cls: "nbp-hint" });
     hint.setText("\u516C\u4F17\u53F7\u4ED8\u8D39\u540E\u4F1A\u62FF\u5230\u4E00\u5F20\u5361\u5BC6\u3002\u2460 \u628A\u5361\u5BC6\u586B\u5230\u4E0B\u9762;\u2461 \u5728\u5FAE\u4FE1\u91CC\u628A\u540C\u4E00\u5F20\u5361\u5BC6\u53D1\u7ED9\u300C\u7B14\u8BB0\u540C\u6B65\u52A9\u624B\u300D\u5BA2\u670D\u6FC0\u6D3B\u3002\u4E4B\u540E\u4F60\u8F6C\u53D1\u7684\u6587\u7AE0\u3001\u94FE\u63A5\u3001\u8D44\u6599\u5C31\u4F1A\u81EA\u52A8\u540C\u6B65\u8FDB\u4E0B\u9762\u8FD9\u4E2A\u6587\u4EF6\u5939\u3002");
     const licSetting = new import_obsidian.Setting(containerEl).setName("\u4ED8\u8D39\u5361\u5BC6");
