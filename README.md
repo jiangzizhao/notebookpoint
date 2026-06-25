@@ -1,25 +1,20 @@
 # NotebookPoint
 
-把你在微信里转发/收藏到「微信知识助理」的文章、链接、资料,**自动同步成 Obsidian 笔记(带全文)**。
+把你在微信里转发的文章、链接、资料,自动同步成 **Obsidian** 笔记。
 
-- 📥 **微信转发 → 自动进 Obsidian**:看到好文章,转发一下,它就变成你的笔记
-- 🔄 **自动同步**:打开 Obsidian 自动拉取,也可每分钟定时同步,零手动
-- 🔒 **隐私优先**:内容走微信官方「知识助理」托管,**作者碰不到你的任何数据**;你的钥匙只存在你自己电脑上
-- 🧩 纯本地 Obsidian 插件,无需自建服务器
+本仓库是 NotebookPoint 的 **Obsidian 插件(客户端,开源)**。它只做一件事:凭你的卡密,从 NotebookPoint 服务拉取你转发的内容,写成 Markdown 笔记到你的 vault。**不含任何密钥**;内容的接收 / 解析 / 存储由托管服务完成。
 
-## 安装与使用
+## 怎么用
+1. 按[图文教程](https://api.monoi.cn/nbp/guide)安装插件
+2. 在插件设置里填入你的**卡密**
+3. 在微信里加「obsidian」客服,把卡密发给它激活
+4. 之后你转发的文章 / 链接,会自动同步进 Obsidian 🎉
 
-1. 下载下方 Release 里的 `notebookpoint-0.1.0.zip`
-2. 解压后把 `notebookpoint` 文件夹放进 `你的仓库/.obsidian/plugins/`
-3. Obsidian → 设置 → 第三方插件 → 启用 NotebookPoint
-4. 填入卡密 + 你的微信知识助理 AppID/Secret → 点同步
+## 构建
+```bash
+npm install
+npm run build   # 产物 main.js
+```
 
-📖 **详细图文教程**:见 [用户安装教程](用户安装教程.md)
-
-## 购买
-
-关注公众号 **【monoi.cn】**,回复「obsidian」获取卡密(¥9.9 / 年)。
-
-<img width="1885" height="624" alt="扫码_搜索联合传播样式-白色版" src="https://github.com/user-attachments/assets/8bf22967-c36d-424f-aad3-5b179b425347" />
-
-> 本仓库仅提供编译好的插件成品。内容捕获与存储由微信官方「微信知识助理」完成,本插件只负责把它同步进你的 Obsidian。
+## License
+MIT
