@@ -16,7 +16,8 @@ export function pickContent(o: any): string {
 
 export function noteRelPath(folder: string, kbName: string, item: KnowledgeItem): string {
   const title = String(item.title || "未命名");
-  return `${folder}/${sanitize(kbName)}/${sanitize(title).slice(0, 80)}-${item.id.slice(0, 8)}.md`;
+  const ym = String(item.created_at || "").slice(0, 7) || "未知日期";   // 按转发月份归档: 2026-06
+  return `${folder}/${sanitize(kbName)}/${ym}/${sanitize(title).slice(0, 80)}-${item.id.slice(0, 8)}.md`;
 }
 
 export function renderNote(kbName: string, item: KnowledgeItem, body: string): string {

@@ -1,7 +1,7 @@
 {
   "id": "notebookpoint",
   "name": "NotebookPoint",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "minAppVersion": "1.4.0",
   "description": "把你在微信里转发的文章、链接、资料,自动整理成 Markdown 笔记.",
   "author": "monoi",

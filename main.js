@@ -187,7 +187,8 @@ function pickContent(o) {
 }
 function noteRelPath(folder, kbName, item) {
   const title = String(item.title || "\u672A\u547D\u540D");
-  return `${folder}/${sanitize(kbName)}/${sanitize(title).slice(0, 80)}-${item.id.slice(0, 8)}.md`;
+  const ym = String(item.created_at || "").slice(0, 7) || "\u672A\u77E5\u65E5\u671F";
+  return `${folder}/${sanitize(kbName)}/${ym}/${sanitize(title).slice(0, 80)}-${item.id.slice(0, 8)}.md`;
 }
 function renderNote(kbName, item, body) {
   const title = String(item.title || "\u672A\u547D\u540D");
