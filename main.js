@@ -299,6 +299,76 @@ async function backendParse(url) {
     return "";
   }
 }
+function decodeEntities2(s) {
+  return s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(parseInt(n, 10))).replace(/&#x([0-9a-fA-F]+);/g, (_m, n) => String.fromCharCode(parseInt(n, 16)));
+}
+var isYouTube = (u) => /(?:youtube\.com\/(?:watch|shorts|embed|live)|youtu\.be\/)/i.test(u);
+var isX = (u) => /(?:twitter\.com|x\.com)\/[^/]+\/status\/\d+/i.test(u);
+function ytVideoId(u) {
+  const m = u.match(/(?:v=|youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : "";
+}
+function tweetId(u) {
+  const m = u.match(/status\/(\d+)/);
+  return m ? m[1] : "";
+}
+async function fetchYouTube(url) {
+  const vid = ytVideoId(url);
+  if (!vid)
+    return null;
+  try {
+    const r = await (0, import_obsidian.requestUrl)({
+      url: "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ context: { client: { clientName: "IOS", clientVersion: "20.10.38", deviceModel: "iPhone16,2" } }, videoId: vid }),
+      throw: false
+    });
+    const d = JSON.parse(r.text);
+    const title = String(d?.videoDetails?.title || "YouTube \u89C6\u9891");
+    const author = String(d?.videoDetails?.author || "");
+    const head = `> \u6765\u6E90: YouTube ${url}${author ? "\n> \u9891\u9053: " + author : ""}
+
+`;
+    const tracks = d?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    if (!tracks.length)
+      return { title, body: head + "\uFF08\u8FD9\u4E2A\u89C6\u9891\u6CA1\u6709\u5B57\u5E55\uFF0C\u65E0\u6CD5\u8F6C\u6587\u5B57\uFF09" };
+    const pick = tracks.find((t) => String(t.languageCode || "").startsWith("zh")) || tracks.find((t) => t.languageCode === "en") || tracks[0];
+    const xr = await (0, import_obsidian.requestUrl)({ url: String(pick.baseUrl), throw: false });
+    const segs = Array.from(xr.text.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)).map((m) => decodeEntities2(String(m[1]).replace(/<[^>]+>/g, "")).trim()).filter(Boolean);
+    if (!segs.length)
+      return { title, body: head + "\uFF08\u5B57\u5E55\u6293\u53D6\u4E3A\u7A7A\uFF09" };
+    return { title, body: head + segs.join(" ") };
+  } catch (e) {
+    console.error("NotebookPoint YouTube \u6293\u53D6\u5931\u8D25", e);
+    return null;
+  }
+}
+async function fetchTweet(url) {
+  const id = tweetId(url);
+  if (!id)
+    return null;
+  try {
+    const r = await (0, import_obsidian.requestUrl)({ url: "https://api.fxtwitter.com/i/status/" + id, throw: false });
+    const t = JSON.parse(r.text)?.tweet;
+    if (!t)
+      return null;
+    const nm = t.author?.name || "", sn = t.author?.screen_name || "";
+    const author = nm ? `${nm}${sn ? " (@" + sn + ")" : ""}` : "";
+    const text = String(t.text || "");
+    const title = text.slice(0, 30).replace(/\s+/g, " ") || "\u63A8\u6587";
+    let body = `> \u6765\u6E90: X ${url}${author ? "\n> \u4F5C\u8005: " + author : ""}
+
+${text}`;
+    const media = (t.media && t.media.all || []).map((m) => m.url).filter(Boolean);
+    if (media.length)
+      body += "\n\n" + media.map((u) => `![](${u})`).join("\n");
+    return { title, body };
+  } catch (e) {
+    console.error("NotebookPoint X \u6293\u53D6\u5931\u8D25", e);
+    return null;
+  }
+}
 var INBOX_API = "https://api.monoi.cn/nbp/wxkf/items";
 var MEDIA_API = "https://api.monoi.cn/nbp/wxkf/media";
 async function fetchInbox(card) {
@@ -456,8 +526,29 @@ https://api.monoi.cn/nbp/guide`, 1e4);
       };
       if (it.media)
         note.media = it.media;
+      let pre = it.content || "";
+      const src = String(it.source || "");
+      if (src) {
+        try {
+          if (isYouTube(src)) {
+            const y = await fetchYouTube(src);
+            if (y) {
+              pre = y.body;
+              note.title = y.title;
+            }
+          } else if (isX(src)) {
+            const x = await fetchTweet(src);
+            if (x) {
+              pre = x.body;
+              note.title = x.title;
+            }
+          }
+        } catch (e) {
+          console.error("NotebookPoint \u7AEF\u6293\u53D6\u5931\u8D25", it.id, e);
+        }
+      }
       try {
-        await this.writeNote("\u5FAE\u4FE1\u8F6C\u53D1", note, null, it.content || "");
+        await this.writeNote("\u5FAE\u4FE1\u8F6C\u53D1", note, null, pre);
         s.syncedIds[sid] = true;
         n++;
       } catch (e) {

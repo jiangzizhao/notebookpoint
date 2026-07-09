@@ -52,6 +52,78 @@ async function backendParse(url: string): Promise<string> {
   } catch { return ""; }
 }
 
+// ---- YouTube / X 走插件端抓取(用用户自己的网络, 国内服务器够不着这两个) ----
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, n) => String.fromCharCode(parseInt(n, 16)));
+}
+const isYouTube = (u: string) => /(?:youtube\.com\/(?:watch|shorts|embed|live)|youtu\.be\/)/i.test(u);
+const isX = (u: string) => /(?:twitter\.com|x\.com)\/[^/]+\/status\/\d+/i.test(u);
+function ytVideoId(u: string): string {
+  const m = u.match(/(?:v=|youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : "";
+}
+function tweetId(u: string): string {
+  const m = u.match(/status\/(\d+)/);
+  return m ? m[1] : "";
+}
+
+// YouTube: InnerTube(iOS 客户端)取字幕轨 → timedtext XML → 逐字稿
+async function fetchYouTube(url: string): Promise<{ title: string; body: string } | null> {
+  const vid = ytVideoId(url);
+  if (!vid) return null;
+  try {
+    const r = await requestUrl({
+      url: "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ context: { client: { clientName: "IOS", clientVersion: "20.10.38", deviceModel: "iPhone16,2" } }, videoId: vid }),
+      throw: false,
+    });
+    const d = JSON.parse(r.text);
+    const title = String(d?.videoDetails?.title || "YouTube 视频");
+    const author = String(d?.videoDetails?.author || "");
+    const head = `> 来源: YouTube ${url}${author ? "\n> 频道: " + author : ""}\n\n`;
+    const tracks = d?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    if (!tracks.length) return { title, body: head + "（这个视频没有字幕，无法转文字）" };
+    const pick = tracks.find((t: any) => String(t.languageCode || "").startsWith("zh"))
+      || tracks.find((t: any) => t.languageCode === "en") || tracks[0];
+    const xr = await requestUrl({ url: String(pick.baseUrl), throw: false });
+    const segs = Array.from(xr.text.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g))
+      .map((m: any) => decodeEntities(String(m[1]).replace(/<[^>]+>/g, "")).trim())
+      .filter(Boolean);
+    if (!segs.length) return { title, body: head + "（字幕抓取为空）" };
+    return { title, body: head + segs.join(" ") };
+  } catch (e) {
+    console.error("NotebookPoint YouTube 抓取失败", e);
+    return null;
+  }
+}
+
+// X(推特): fxtwitter 免费 JSON 取原文(不总结)
+async function fetchTweet(url: string): Promise<{ title: string; body: string } | null> {
+  const id = tweetId(url);
+  if (!id) return null;
+  try {
+    const r = await requestUrl({ url: "https://api.fxtwitter.com/i/status/" + id, throw: false });
+    const t = JSON.parse(r.text)?.tweet;
+    if (!t) return null;
+    const nm = t.author?.name || "", sn = t.author?.screen_name || "";
+    const author = nm ? `${nm}${sn ? " (@" + sn + ")" : ""}` : "";
+    const text = String(t.text || "");
+    const title = (text.slice(0, 30).replace(/\s+/g, " ") || "推文");
+    let body = `> 来源: X ${url}${author ? "\n> 作者: " + author : ""}\n\n${text}`;
+    const media = ((t.media && t.media.all) || []).map((m: any) => m.url).filter(Boolean);
+    if (media.length) body += "\n\n" + media.map((u: string) => `![](${u})`).join("\n");
+    return { title, body };
+  } catch (e) {
+    console.error("NotebookPoint X 抓取失败", e);
+    return null;
+  }
+}
+
 // 微信客服自有机器人 inbox: 用户转发给「Obsidian同步助手」的内容已在服务器解析好, 这里直接拉取。
 const INBOX_API = "https://api.monoi.cn/nbp/wxkf/items";
 const MEDIA_API = "https://api.monoi.cn/nbp/wxkf/media";
@@ -203,8 +275,17 @@ export default class NotebookPointPlugin extends Plugin {
         created_at: it.created_at || "",
       };
       if (it.media) (note as unknown as { media?: unknown }).media = it.media;
+      // YouTube / X: 服务器够不着, 这里用用户自己的网络抓正文
+      let pre = it.content || "";
+      const src = String(it.source || "");
+      if (src) {
+        try {
+          if (isYouTube(src)) { const y = await fetchYouTube(src); if (y) { pre = y.body; note.title = y.title; } }
+          else if (isX(src)) { const x = await fetchTweet(src); if (x) { pre = x.body; note.title = x.title; } }
+        } catch (e) { console.error("NotebookPoint 端抓取失败", it.id, e); }
+      }
       try {
-        await this.writeNote("微信转发", note, null, it.content || "");
+        await this.writeNote("微信转发", note, null, pre);
         s.syncedIds[sid] = true;
         n++;
       } catch (e) {
