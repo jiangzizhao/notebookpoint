@@ -83,19 +83,23 @@ async function fetchYouTube(url: string): Promise<{ title: string; body: string 
       throw: false,
     });
     const d = JSON.parse(r.text);
-    const title = String(d?.videoDetails?.title || "YouTube 视频");
-    const author = String(d?.videoDetails?.author || "");
-    const head = `> 来源: YouTube ${url}${author ? "\n> 频道: " + author : ""}\n\n`;
+    const vd = d?.videoDetails || {};
+    const title = String(vd.title || "YouTube 视频");
+    const author = String(vd.author || "");
+    const desc = String(vd.shortDescription || "").trim();
+    let body = `> 来源: YouTube ${url}${author ? "\n> 频道: " + author : ""}\n`;
+    if (desc) body += `\n## 简介\n\n${desc}\n`;
     const tracks = d?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-    if (!tracks.length) return { title, body: head + "（这个视频没有字幕，无法转文字）" };
-    const pick = tracks.find((t: any) => String(t.languageCode || "").startsWith("zh"))
-      || tracks.find((t: any) => t.languageCode === "en") || tracks[0];
-    const xr = await requestUrl({ url: String(pick.baseUrl), throw: false });
-    const segs = Array.from(xr.text.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g))
-      .map((m: any) => decodeEntities(String(m[1]).replace(/<[^>]+>/g, "")).trim())
-      .filter(Boolean);
-    if (!segs.length) return { title, body: head + "（字幕抓取为空）" };
-    return { title, body: head + segs.join(" ") };
+    if (tracks.length) {
+      const pick = tracks.find((t: any) => String(t.languageCode || "").startsWith("zh"))
+        || tracks.find((t: any) => t.languageCode === "en") || tracks[0];
+      const xr = await requestUrl({ url: String(pick.baseUrl), throw: false });
+      const segs = Array.from(xr.text.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g))
+        .map((m: any) => decodeEntities(String(m[1]).replace(/<[^>]+>/g, "")).trim())
+        .filter(Boolean);
+      if (segs.length) body += `\n## 正文\n\n${segs.join(" ")}\n`;
+    }
+    return { title, body };
   } catch (e) {
     console.error("NotebookPoint YouTube 抓取失败", e);
     return null;

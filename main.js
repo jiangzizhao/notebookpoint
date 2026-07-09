@@ -325,20 +325,31 @@ async function fetchYouTube(url) {
       throw: false
     });
     const d = JSON.parse(r.text);
-    const title = String(d?.videoDetails?.title || "YouTube \u89C6\u9891");
-    const author = String(d?.videoDetails?.author || "");
-    const head = `> \u6765\u6E90: YouTube ${url}${author ? "\n> \u9891\u9053: " + author : ""}
+    const vd = d?.videoDetails || {};
+    const title = String(vd.title || "YouTube \u89C6\u9891");
+    const author = String(vd.author || "");
+    const desc = String(vd.shortDescription || "").trim();
+    let body = `> \u6765\u6E90: YouTube ${url}${author ? "\n> \u9891\u9053: " + author : ""}
+`;
+    if (desc)
+      body += `
+## \u7B80\u4ECB
 
+${desc}
 `;
     const tracks = d?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-    if (!tracks.length)
-      return { title, body: head + "\uFF08\u8FD9\u4E2A\u89C6\u9891\u6CA1\u6709\u5B57\u5E55\uFF0C\u65E0\u6CD5\u8F6C\u6587\u5B57\uFF09" };
-    const pick = tracks.find((t) => String(t.languageCode || "").startsWith("zh")) || tracks.find((t) => t.languageCode === "en") || tracks[0];
-    const xr = await (0, import_obsidian.requestUrl)({ url: String(pick.baseUrl), throw: false });
-    const segs = Array.from(xr.text.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)).map((m) => decodeEntities2(String(m[1]).replace(/<[^>]+>/g, "")).trim()).filter(Boolean);
-    if (!segs.length)
-      return { title, body: head + "\uFF08\u5B57\u5E55\u6293\u53D6\u4E3A\u7A7A\uFF09" };
-    return { title, body: head + segs.join(" ") };
+    if (tracks.length) {
+      const pick = tracks.find((t) => String(t.languageCode || "").startsWith("zh")) || tracks.find((t) => t.languageCode === "en") || tracks[0];
+      const xr = await (0, import_obsidian.requestUrl)({ url: String(pick.baseUrl), throw: false });
+      const segs = Array.from(xr.text.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)).map((m) => decodeEntities2(String(m[1]).replace(/<[^>]+>/g, "")).trim()).filter(Boolean);
+      if (segs.length)
+        body += `
+## \u6B63\u6587
+
+${segs.join(" ")}
+`;
+    }
+    return { title, body };
   } catch (e) {
     console.error("NotebookPoint YouTube \u6293\u53D6\u5931\u8D25", e);
     return null;
