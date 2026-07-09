@@ -3,7 +3,7 @@ import {
 } from "obsidian";
 import { WeknoraClient } from "./weknora";
 import type { HttpFn, KnowledgeItem } from "./weknora";
-import { renderNote, noteRelPath, pickContent } from "./render";
+import { renderNote, noteRelPath, pickContent, sanitize } from "./render";
 import { verifyLicense, licenseStatusText } from "./license";
 
 interface NbpSettings {
@@ -54,9 +54,11 @@ async function backendParse(url: string): Promise<string> {
 
 // 微信客服自有机器人 inbox: 用户转发给「Obsidian同步助手」的内容已在服务器解析好, 这里直接拉取。
 const INBOX_API = "https://api.monoi.cn/nbp/wxkf/items";
+const MEDIA_API = "https://api.monoi.cn/nbp/wxkf/media";
 interface InboxItem {
   id: string; type?: string; title?: string; source?: string;
   content?: string; created_at?: string;
+  media?: { id: string; name: string; kind: string }[];
 }
 // 凭卡密拉取自己的内容(服务器按卡密绑定的微信号做多用户隔离)。
 async function fetchInbox(card: string): Promise<InboxItem[]> {
@@ -200,6 +202,7 @@ export default class NotebookPointPlugin extends Plugin {
         type: it.type || "",
         created_at: it.created_at || "",
       };
+      if (it.media) (note as unknown as { media?: unknown }).media = it.media;
       try {
         await this.writeNote("微信转发", note, null, it.content || "");
         s.syncedIds[sid] = true;
@@ -224,6 +227,35 @@ export default class NotebookPointPlugin extends Plugin {
         try { body = pickContent(await c.getKnowledge(it.id)); }
         catch { body = pickContent(it); }
       }
+    }
+
+    // 媒体(图片): 下载进 vault 的 _附件 文件夹, 笔记里本地嵌入 ![[...]](永久, 不依赖服务器)
+    const media = (it as unknown as { media?: { id: string; name: string; kind: string }[] }).media;
+    if (media && media.length) {
+      const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_附件`;
+      await this.ensureFolder(attachDir);
+      const card = this.settings.license.trim();
+      let embeds = "";
+      for (const md of media) {
+        try {
+          const apath = normalizePath(`${attachDir}/${md.id}`);
+          if (!this.app.vault.getAbstractFileByPath(apath)) {
+            const r = await requestUrl({
+              url: MEDIA_API + "?card=" + encodeURIComponent(card) + "&id=" + encodeURIComponent(md.id),
+              throw: false,
+            });
+            if (r.status === 200 && r.arrayBuffer) await this.app.vault.createBinary(apath, r.arrayBuffer);
+          }
+          if (this.app.vault.getAbstractFileByPath(apath)) {
+            if (md.kind === "image") embeds += `\n![[${md.id}]]\n`;
+            else {                                              // 文件/Excel: 链接, 显示原文件名
+              const alias = String(md.name || md.id).replace(/[[\]|]/g, "_");
+              embeds += `\n[[${md.id}|${alias}]]\n`;
+            }
+          }
+        } catch (e) { console.error("NotebookPoint 媒体下载失败", md.id, e); }
+      }
+      body = (body ? body + "\n" : "") + embeds;
     }
 
     const path = normalizePath(noteRelPath(this.settings.folder, kbName, it));

@@ -300,6 +300,7 @@ async function backendParse(url) {
   }
 }
 var INBOX_API = "https://api.monoi.cn/nbp/wxkf/items";
+var MEDIA_API = "https://api.monoi.cn/nbp/wxkf/media";
 async function fetchInbox(card) {
   try {
     const r = await (0, import_obsidian.requestUrl)({ url: INBOX_API + "?card=" + encodeURIComponent(card), throw: false });
@@ -453,6 +454,8 @@ https://api.monoi.cn/nbp/guide`, 1e4);
         type: it.type || "",
         created_at: it.created_at || ""
       };
+      if (it.media)
+        note.media = it.media;
       try {
         await this.writeNote("\u5FAE\u4FE1\u8F6C\u53D1", note, null, it.content || "");
         s.syncedIds[sid] = true;
@@ -481,6 +484,41 @@ https://api.monoi.cn/nbp/guide`, 1e4);
           body = pickContent(it);
         }
       }
+    }
+    const media = it.media;
+    if (media && media.length) {
+      const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_\u9644\u4EF6`;
+      await this.ensureFolder(attachDir);
+      const card = this.settings.license.trim();
+      let embeds = "";
+      for (const md of media) {
+        try {
+          const apath = (0, import_obsidian.normalizePath)(`${attachDir}/${md.id}`);
+          if (!this.app.vault.getAbstractFileByPath(apath)) {
+            const r = await (0, import_obsidian.requestUrl)({
+              url: MEDIA_API + "?card=" + encodeURIComponent(card) + "&id=" + encodeURIComponent(md.id),
+              throw: false
+            });
+            if (r.status === 200 && r.arrayBuffer)
+              await this.app.vault.createBinary(apath, r.arrayBuffer);
+          }
+          if (this.app.vault.getAbstractFileByPath(apath)) {
+            if (md.kind === "image")
+              embeds += `
+![[${md.id}]]
+`;
+            else {
+              const alias = String(md.name || md.id).replace(/[[\]|]/g, "_");
+              embeds += `
+[[${md.id}|${alias}]]
+`;
+            }
+          }
+        } catch (e) {
+          console.error("NotebookPoint \u5A92\u4F53\u4E0B\u8F7D\u5931\u8D25", md.id, e);
+        }
+      }
+      body = (body ? body + "\n" : "") + embeds;
     }
     const path = (0, import_obsidian.normalizePath)(noteRelPath(this.settings.folder, kbName, it));
     await this.ensureFolder(path.substring(0, path.lastIndexOf("/")));
