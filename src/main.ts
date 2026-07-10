@@ -14,6 +14,8 @@ interface NbpSettings {
   syncOnStartup: boolean;
   autoSyncMinutes: number;
   syncedIds: Record<string, true>;
+  // 媒体(图片/文件)没拉全的条目 → 记重试次数, 下次同步接着补(到上限才放弃)
+  mediaRetry: Record<string, number>;
   // 卡密激活缓存(避免每次同步都打服务器 + 断网宽限)
   actCard: string;
   actAppid: string;
@@ -27,6 +29,7 @@ interface NbpSettings {
 const DEFAULTS: NbpSettings = {
   appid: "", secret: "", license: "",
   folder: "NotebookPoint", syncOnStartup: true, autoSyncMinutes: 1, syncedIds: {},
+  mediaRetry: {},
   actCard: "", actAppid: "", actOk: false, actExp: 0, actChecked: 0,
   inboxKey: "",
 };
@@ -270,7 +273,10 @@ export default class NotebookPointPlugin extends Plugin {
     let n = 0;
     for (const it of items) {
       const sid = "kf:" + it.id;
-      if (s.syncedIds[sid]) continue;
+      const wasSynced = !!s.syncedIds[sid];
+      const hasMedia = Array.isArray(it.media) && it.media.length > 0;
+      // 已同步且(无图 / 图都在库里)→ 跳过; 带图但附件缺失(旧版漏下/曾失败)→ 破例重拉一次
+      if (wasSynced && (!hasMedia || this.mediaPresent("微信转发", it))) continue;
       const note: KnowledgeItem = {
         id: String(it.id),
         title: it.title || "未命名",
@@ -289,9 +295,17 @@ export default class NotebookPointPlugin extends Plugin {
         } catch (e) { console.error("NotebookPoint 端抓取失败", it.id, e); }
       }
       try {
-        await this.writeNote("微信转发", note, null, pre);
-        s.syncedIds[sid] = true;
-        n++;
+        const mediaOk = await this.writeNote("微信转发", note, null, pre);
+        if (!wasSynced) n++;
+        if (mediaOk) {
+          s.syncedIds[sid] = true;
+          delete s.mediaRetry[sid];
+        } else {
+          // 图没拉全: 记一次, 保持"未完成"下次继续补; 连试多次仍失败(如卡密不对)才放弃
+          const tries = (s.mediaRetry[sid] = (s.mediaRetry[sid] || 0) + 1);
+          if (tries >= 8) s.syncedIds[sid] = true;
+          else if (wasSynced) delete s.syncedIds[sid];
+        }
       } catch (e) {
         console.error("NotebookPoint inbox 写入失败", it.id, e);
       }
@@ -299,8 +313,17 @@ export default class NotebookPointPlugin extends Plugin {
     return n;
   }
 
+  // 这条 item 带的媒体是否都已在库里(无媒体视为齐全)。
+  private mediaPresent(kbName: string, it: { media?: { id: string }[] }): boolean {
+    const media = it.media;
+    if (!media || !media.length) return true;
+    const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_附件`;
+    return media.every((md) => !!this.app.vault.getAbstractFileByPath(normalizePath(`${attachDir}/${md.id}`)));
+  }
+
   // c 为 null 时表示正文已由 preBody 给好(微信客服 inbox); 否则走 weknora 取正文+兜底。
-  private async writeNote(kbName: string, it: KnowledgeItem, c: WeknoraClient | null, preBody?: string) {
+  // 返回值: 该条的媒体是否都已就位(无媒体=true)。false 表示有图/文件没拉下来, 交由调用方重试。
+  private async writeNote(kbName: string, it: KnowledgeItem, c: WeknoraClient | null, preBody?: string): Promise<boolean> {
     let body = preBody || "";
     if (!body && c) {
       try { body = await c.getContent(it.id); } catch { /* 下面兜底 */ }
@@ -315,12 +338,14 @@ export default class NotebookPointPlugin extends Plugin {
     }
 
     // 媒体(图片): 下载进 vault 的 _附件 文件夹, 笔记里本地嵌入 ![[...]](永久, 不依赖服务器)
+    let mediaOk = true;
     const media = (it as unknown as { media?: { id: string; name: string; kind: string }[] }).media;
     if (media && media.length) {
       const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_附件`;
       await this.ensureFolder(attachDir);
       const card = this.settings.license.trim();
       let embeds = "";
+      let missing = 0;
       for (const md of media) {
         try {
           const apath = normalizePath(`${attachDir}/${md.id}`);
@@ -337,8 +362,12 @@ export default class NotebookPointPlugin extends Plugin {
               const alias = String(md.name || md.id).replace(/[[\]|]/g, "_");
               embeds += `\n[[${md.id}|${alias}]]\n`;
             }
-          }
-        } catch (e) { console.error("NotebookPoint 媒体下载失败", md.id, e); }
+          } else { missing++; }                                 // 没拉下来 → 交给外层重试
+        } catch (e) { missing++; console.error("NotebookPoint 媒体下载失败", md.id, e); }
+      }
+      if (missing) {
+        mediaOk = false;
+        embeds += `\n> [!warning] 有 ${missing} 张图片/文件还没同步下来\n> 正在自动重试。若一直不出现:请确认插件里的「付费卡密」就是你发给「obsidian」客服激活的那张,再点插件设置里的「连接」。\n`;
       }
       body = (body ? body + "\n" : "") + embeds;
     }
@@ -350,6 +379,7 @@ export default class NotebookPointPlugin extends Plugin {
     const existing = this.app.vault.getAbstractFileByPath(path);
     if (existing instanceof TFile) await this.app.vault.modify(existing, content);
     else await this.app.vault.create(path, content);
+    return mediaOk;
   }
 
   private async ensureFolder(path: string) {

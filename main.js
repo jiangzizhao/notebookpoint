@@ -275,6 +275,7 @@ var DEFAULTS = {
   syncOnStartup: true,
   autoSyncMinutes: 1,
   syncedIds: {},
+  mediaRetry: {},
   actCard: "",
   actAppid: "",
   actOk: false,
@@ -526,7 +527,9 @@ https://api.monoi.cn/nbp/guide`, 1e4);
     let n = 0;
     for (const it of items) {
       const sid = "kf:" + it.id;
-      if (s.syncedIds[sid])
+      const wasSynced = !!s.syncedIds[sid];
+      const hasMedia = Array.isArray(it.media) && it.media.length > 0;
+      if (wasSynced && (!hasMedia || this.mediaPresent("\u5FAE\u4FE1\u8F6C\u53D1", it)))
         continue;
       const note = {
         id: String(it.id),
@@ -559,16 +562,35 @@ https://api.monoi.cn/nbp/guide`, 1e4);
         }
       }
       try {
-        await this.writeNote("\u5FAE\u4FE1\u8F6C\u53D1", note, null, pre);
-        s.syncedIds[sid] = true;
-        n++;
+        const mediaOk = await this.writeNote("\u5FAE\u4FE1\u8F6C\u53D1", note, null, pre);
+        if (!wasSynced)
+          n++;
+        if (mediaOk) {
+          s.syncedIds[sid] = true;
+          delete s.mediaRetry[sid];
+        } else {
+          const tries = s.mediaRetry[sid] = (s.mediaRetry[sid] || 0) + 1;
+          if (tries >= 8)
+            s.syncedIds[sid] = true;
+          else if (wasSynced)
+            delete s.syncedIds[sid];
+        }
       } catch (e) {
         console.error("NotebookPoint inbox \u5199\u5165\u5931\u8D25", it.id, e);
       }
     }
     return n;
   }
+  // 这条 item 带的媒体是否都已在库里(无媒体视为齐全)。
+  mediaPresent(kbName, it) {
+    const media = it.media;
+    if (!media || !media.length)
+      return true;
+    const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_\u9644\u4EF6`;
+    return media.every((md) => !!this.app.vault.getAbstractFileByPath((0, import_obsidian.normalizePath)(`${attachDir}/${md.id}`)));
+  }
   // c 为 null 时表示正文已由 preBody 给好(微信客服 inbox); 否则走 weknora 取正文+兜底。
+  // 返回值: 该条的媒体是否都已就位(无媒体=true)。false 表示有图/文件没拉下来, 交由调用方重试。
   async writeNote(kbName, it, c, preBody) {
     let body = preBody || "";
     if (!body && c) {
@@ -587,12 +609,14 @@ https://api.monoi.cn/nbp/guide`, 1e4);
         }
       }
     }
+    let mediaOk = true;
     const media = it.media;
     if (media && media.length) {
       const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_\u9644\u4EF6`;
       await this.ensureFolder(attachDir);
       const card = this.settings.license.trim();
       let embeds = "";
+      let missing = 0;
       for (const md of media) {
         try {
           const apath = (0, import_obsidian.normalizePath)(`${attachDir}/${md.id}`);
@@ -615,10 +639,20 @@ https://api.monoi.cn/nbp/guide`, 1e4);
 [[${md.id}|${alias}]]
 `;
             }
+          } else {
+            missing++;
           }
         } catch (e) {
+          missing++;
           console.error("NotebookPoint \u5A92\u4F53\u4E0B\u8F7D\u5931\u8D25", md.id, e);
         }
+      }
+      if (missing) {
+        mediaOk = false;
+        embeds += `
+> [!warning] \u6709 ${missing} \u5F20\u56FE\u7247/\u6587\u4EF6\u8FD8\u6CA1\u540C\u6B65\u4E0B\u6765
+> \u6B63\u5728\u81EA\u52A8\u91CD\u8BD5\u3002\u82E5\u4E00\u76F4\u4E0D\u51FA\u73B0:\u8BF7\u786E\u8BA4\u63D2\u4EF6\u91CC\u7684\u300C\u4ED8\u8D39\u5361\u5BC6\u300D\u5C31\u662F\u4F60\u53D1\u7ED9\u300Cobsidian\u300D\u5BA2\u670D\u6FC0\u6D3B\u7684\u90A3\u5F20,\u518D\u70B9\u63D2\u4EF6\u8BBE\u7F6E\u91CC\u7684\u300C\u8FDE\u63A5\u300D\u3002
+`;
       }
       body = (body ? body + "\n" : "") + embeds;
     }
@@ -630,6 +664,7 @@ https://api.monoi.cn/nbp/guide`, 1e4);
       await this.app.vault.modify(existing, content);
     else
       await this.app.vault.create(path, content);
+    return mediaOk;
   }
   async ensureFolder(path) {
     const parts = path.split("/");
