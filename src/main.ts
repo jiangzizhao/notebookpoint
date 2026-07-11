@@ -16,6 +16,8 @@ interface NbpSettings {
   syncedIds: Record<string, true>;
   // 媒体(图片/文件)没拉全的条目 → 记重试次数, 下次同步接着补(到上限才放弃)
   mediaRetry: Record<string, number>;
+  // 已成功下载过的媒体 id → true。图只下一次:下过之后用户再删(删图或删笔记)就不再补回来。
+  fetchedMedia: Record<string, true>;
   // 卡密激活缓存(避免每次同步都打服务器 + 断网宽限)
   actCard: string;
   actAppid: string;
@@ -29,7 +31,7 @@ interface NbpSettings {
 const DEFAULTS: NbpSettings = {
   appid: "", secret: "", license: "",
   folder: "NotebookPoint", syncOnStartup: true, autoSyncMinutes: 1, syncedIds: {},
-  mediaRetry: {},
+  mediaRetry: {}, fetchedMedia: {},
   actCard: "", actAppid: "", actOk: false, actExp: 0, actChecked: 0,
   inboxKey: "",
 };
@@ -275,14 +277,9 @@ export default class NotebookPointPlugin extends Plugin {
       const sid = "kf:" + it.id;
       const wasSynced = !!s.syncedIds[sid];
       const hasMedia = Array.isArray(it.media) && it.media.length > 0;
-      if (wasSynced) {
-        // 无图 / 图都在库里 → 跳过。用户删掉的笔记也走这条:尊重删除, 不再同步回来。
-        if (!hasMedia || this.mediaPresent("微信转发", it)) continue;
-        // 带图但附件缺失:只在「笔记本身还在、只是图丢了」时才补图;
-        // 整条笔记被用户删掉的话就尊重删除, 不重建(否则删了带图的笔记又会被同步回来)。
-        const np = normalizePath(noteRelPath(s.folder, "微信转发", it as unknown as KnowledgeItem));
-        if (!this.app.vault.getAbstractFileByPath(np)) continue;
-      }
+      // 已同步 且 (无图 / 所有图都成功下过一次 / 补图已放弃) → 跳过。
+      // 图只下一次:下过之后用户删图或删整条笔记都不再拉回来; 只有"从没下成功过"的图才继续补。
+      if (wasSynced && (!hasMedia || this.allMediaFetched(it) || (s.mediaRetry[sid] || 0) >= 8)) continue;
       const note: KnowledgeItem = {
         id: String(it.id),
         title: it.title || "未命名",
@@ -303,15 +300,9 @@ export default class NotebookPointPlugin extends Plugin {
       try {
         const mediaOk = await this.writeNote("微信转发", note, null, pre);
         if (!wasSynced) n++;
-        if (mediaOk) {
-          s.syncedIds[sid] = true;
-          delete s.mediaRetry[sid];
-        } else {
-          // 图没拉全: 记一次, 保持"未完成"下次继续补; 连试多次仍失败(如卡密不对)才放弃
-          const tries = (s.mediaRetry[sid] = (s.mediaRetry[sid] || 0) + 1);
-          if (tries >= 8) s.syncedIds[sid] = true;
-          else if (wasSynced) delete s.syncedIds[sid];
-        }
+        s.syncedIds[sid] = true;                 // 标记"已处理过"; 是否再来由上面的 gate(fetched/放弃)决定
+        if (mediaOk) delete s.mediaRetry[sid];
+        else s.mediaRetry[sid] = (s.mediaRetry[sid] || 0) + 1;   // 还有没下成功的图 → 计数, 下次接着补, 够8次放弃
       } catch (e) {
         console.error("NotebookPoint inbox 写入失败", it.id, e);
       }
@@ -319,12 +310,22 @@ export default class NotebookPointPlugin extends Plugin {
     return n;
   }
 
-  // 这条 item 带的媒体是否都已在库里(无媒体视为齐全)。
-  private mediaPresent(kbName: string, it: { media?: { id: string }[] }): boolean {
+  // 这条 item 的媒体是否都已"至少成功下过一次"(无媒体视为是)。
+  // 一旦下过一次, 之后用户删了图/删了笔记都不再补 —— 靠这个判断"这条不用再处理了"。
+  // 兜底:文件已在库里(老用户升级 / 之前下过)→ 就地记为"下过", 避免升级时重写笔记、也让之后的删除生效。
+  private allMediaFetched(it: { media?: { id: string }[] }): boolean {
     const media = it.media;
     if (!media || !media.length) return true;
-    const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_附件`;
-    return media.every((md) => !!this.app.vault.getAbstractFileByPath(normalizePath(`${attachDir}/${md.id}`)));
+    const fetched = this.settings.fetchedMedia;
+    const attachDir = `${this.settings.folder}/${sanitize("微信转发")}/_附件`;
+    return media.every((md) => {
+      if (fetched[md.id]) return true;
+      if (this.app.vault.getAbstractFileByPath(normalizePath(`${attachDir}/${md.id}`))) {
+        fetched[md.id] = true;
+        return true;
+      }
+      return false;
+    });
   }
 
   // c 为 null 时表示正文已由 preBody 给好(微信客服 inbox); 否则走 weknora 取正文+兜底。
@@ -350,12 +351,15 @@ export default class NotebookPointPlugin extends Plugin {
       const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_附件`;
       await this.ensureFolder(attachDir);
       const card = this.settings.license.trim();
+      const fetched = this.settings.fetchedMedia;
       let embeds = "";
       let missing = 0;
       for (const md of media) {
         try {
           const apath = normalizePath(`${attachDir}/${md.id}`);
           if (!this.app.vault.getAbstractFileByPath(apath)) {
+            // 曾经下过、现在文件没了 = 用户主动删的 → 尊重删除:不再下载、不嵌入、不告警。
+            if (fetched[md.id]) continue;
             const r = await requestUrl({
               url: MEDIA_API + "?card=" + encodeURIComponent(card) + "&id=" + encodeURIComponent(md.id),
               throw: false,
@@ -363,12 +367,13 @@ export default class NotebookPointPlugin extends Plugin {
             if (r.status === 200 && r.arrayBuffer) await this.app.vault.createBinary(apath, r.arrayBuffer);
           }
           if (this.app.vault.getAbstractFileByPath(apath)) {
+            fetched[md.id] = true;                              // 标记"已下过", 以后删了不再补
             if (md.kind === "image") embeds += `\n![[${md.id}]]\n`;
             else {                                              // 文件/Excel: 链接, 显示原文件名
               const alias = String(md.name || md.id).replace(/[[\]|]/g, "_");
               embeds += `\n[[${md.id}|${alias}]]\n`;
             }
-          } else { missing++; }                                 // 没拉下来 → 交给外层重试
+          } else { missing++; }                                 // 从没下成功过、这次也失败 → 交给外层重试
         } catch (e) { missing++; console.error("NotebookPoint 媒体下载失败", md.id, e); }
       }
       if (missing) {

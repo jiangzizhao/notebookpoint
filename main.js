@@ -276,6 +276,7 @@ var DEFAULTS = {
   autoSyncMinutes: 1,
   syncedIds: {},
   mediaRetry: {},
+  fetchedMedia: {},
   actCard: "",
   actAppid: "",
   actOk: false,
@@ -529,13 +530,8 @@ https://api.monoi.cn/nbp/guide`, 1e4);
       const sid = "kf:" + it.id;
       const wasSynced = !!s.syncedIds[sid];
       const hasMedia = Array.isArray(it.media) && it.media.length > 0;
-      if (wasSynced) {
-        if (!hasMedia || this.mediaPresent("\u5FAE\u4FE1\u8F6C\u53D1", it))
-          continue;
-        const np = (0, import_obsidian.normalizePath)(noteRelPath(s.folder, "\u5FAE\u4FE1\u8F6C\u53D1", it));
-        if (!this.app.vault.getAbstractFileByPath(np))
-          continue;
-      }
+      if (wasSynced && (!hasMedia || this.allMediaFetched(it) || (s.mediaRetry[sid] || 0) >= 8))
+        continue;
       const note = {
         id: String(it.id),
         title: it.title || "\u672A\u547D\u540D",
@@ -570,29 +566,35 @@ https://api.monoi.cn/nbp/guide`, 1e4);
         const mediaOk = await this.writeNote("\u5FAE\u4FE1\u8F6C\u53D1", note, null, pre);
         if (!wasSynced)
           n++;
-        if (mediaOk) {
-          s.syncedIds[sid] = true;
+        s.syncedIds[sid] = true;
+        if (mediaOk)
           delete s.mediaRetry[sid];
-        } else {
-          const tries = s.mediaRetry[sid] = (s.mediaRetry[sid] || 0) + 1;
-          if (tries >= 8)
-            s.syncedIds[sid] = true;
-          else if (wasSynced)
-            delete s.syncedIds[sid];
-        }
+        else
+          s.mediaRetry[sid] = (s.mediaRetry[sid] || 0) + 1;
       } catch (e) {
         console.error("NotebookPoint inbox \u5199\u5165\u5931\u8D25", it.id, e);
       }
     }
     return n;
   }
-  // 这条 item 带的媒体是否都已在库里(无媒体视为齐全)。
-  mediaPresent(kbName, it) {
+  // 这条 item 的媒体是否都已"至少成功下过一次"(无媒体视为是)。
+  // 一旦下过一次, 之后用户删了图/删了笔记都不再补 —— 靠这个判断"这条不用再处理了"。
+  // 兜底:文件已在库里(老用户升级 / 之前下过)→ 就地记为"下过", 避免升级时重写笔记、也让之后的删除生效。
+  allMediaFetched(it) {
     const media = it.media;
     if (!media || !media.length)
       return true;
-    const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_\u9644\u4EF6`;
-    return media.every((md) => !!this.app.vault.getAbstractFileByPath((0, import_obsidian.normalizePath)(`${attachDir}/${md.id}`)));
+    const fetched = this.settings.fetchedMedia;
+    const attachDir = `${this.settings.folder}/${sanitize("\u5FAE\u4FE1\u8F6C\u53D1")}/_\u9644\u4EF6`;
+    return media.every((md) => {
+      if (fetched[md.id])
+        return true;
+      if (this.app.vault.getAbstractFileByPath((0, import_obsidian.normalizePath)(`${attachDir}/${md.id}`))) {
+        fetched[md.id] = true;
+        return true;
+      }
+      return false;
+    });
   }
   // c 为 null 时表示正文已由 preBody 给好(微信客服 inbox); 否则走 weknora 取正文+兜底。
   // 返回值: 该条的媒体是否都已就位(无媒体=true)。false 表示有图/文件没拉下来, 交由调用方重试。
@@ -620,12 +622,15 @@ https://api.monoi.cn/nbp/guide`, 1e4);
       const attachDir = `${this.settings.folder}/${sanitize(kbName)}/_\u9644\u4EF6`;
       await this.ensureFolder(attachDir);
       const card = this.settings.license.trim();
+      const fetched = this.settings.fetchedMedia;
       let embeds = "";
       let missing = 0;
       for (const md of media) {
         try {
           const apath = (0, import_obsidian.normalizePath)(`${attachDir}/${md.id}`);
           if (!this.app.vault.getAbstractFileByPath(apath)) {
+            if (fetched[md.id])
+              continue;
             const r = await (0, import_obsidian.requestUrl)({
               url: MEDIA_API + "?card=" + encodeURIComponent(card) + "&id=" + encodeURIComponent(md.id),
               throw: false
@@ -634,6 +639,7 @@ https://api.monoi.cn/nbp/guide`, 1e4);
               await this.app.vault.createBinary(apath, r.arrayBuffer);
           }
           if (this.app.vault.getAbstractFileByPath(apath)) {
+            fetched[md.id] = true;
             if (md.kind === "image")
               embeds += `
 ![[${md.id}]]
