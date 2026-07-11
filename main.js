@@ -529,8 +529,13 @@ https://api.monoi.cn/nbp/guide`, 1e4);
       const sid = "kf:" + it.id;
       const wasSynced = !!s.syncedIds[sid];
       const hasMedia = Array.isArray(it.media) && it.media.length > 0;
-      if (wasSynced && (!hasMedia || this.mediaPresent("\u5FAE\u4FE1\u8F6C\u53D1", it)))
-        continue;
+      if (wasSynced) {
+        if (!hasMedia || this.mediaPresent("\u5FAE\u4FE1\u8F6C\u53D1", it))
+          continue;
+        const np = (0, import_obsidian.normalizePath)(noteRelPath(s.folder, "\u5FAE\u4FE1\u8F6C\u53D1", it));
+        if (!this.app.vault.getAbstractFileByPath(np))
+          continue;
+      }
       const note = {
         id: String(it.id),
         title: it.title || "\u672A\u547D\u540D",

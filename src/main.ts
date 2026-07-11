@@ -275,8 +275,14 @@ export default class NotebookPointPlugin extends Plugin {
       const sid = "kf:" + it.id;
       const wasSynced = !!s.syncedIds[sid];
       const hasMedia = Array.isArray(it.media) && it.media.length > 0;
-      // 已同步且(无图 / 图都在库里)→ 跳过; 带图但附件缺失(旧版漏下/曾失败)→ 破例重拉一次
-      if (wasSynced && (!hasMedia || this.mediaPresent("微信转发", it))) continue;
+      if (wasSynced) {
+        // 无图 / 图都在库里 → 跳过。用户删掉的笔记也走这条:尊重删除, 不再同步回来。
+        if (!hasMedia || this.mediaPresent("微信转发", it)) continue;
+        // 带图但附件缺失:只在「笔记本身还在、只是图丢了」时才补图;
+        // 整条笔记被用户删掉的话就尊重删除, 不重建(否则删了带图的笔记又会被同步回来)。
+        const np = normalizePath(noteRelPath(s.folder, "微信转发", it as unknown as KnowledgeItem));
+        if (!this.app.vault.getAbstractFileByPath(np)) continue;
+      }
       const note: KnowledgeItem = {
         id: String(it.id),
         title: it.title || "未命名",
