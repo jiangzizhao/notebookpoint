@@ -640,11 +640,12 @@ https://api.monoi.cn/nbp/guide`, 1e4);
           }
           if (this.app.vault.getAbstractFileByPath(apath)) {
             fetched[md.id] = true;
-            if (md.kind === "image")
-              embeds += `
+            if (md.kind === "image") {
+              if (!body.includes(`![[${md.id}]]`))
+                embeds += `
 ![[${md.id}]]
 `;
-            else {
+            } else {
               const alias = String(md.name || md.id).replace(/[[\]|]/g, "_");
               embeds += `
 [[${md.id}|${alias}]]

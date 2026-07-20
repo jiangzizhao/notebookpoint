@@ -368,7 +368,8 @@ export default class NotebookPointPlugin extends Plugin {
           }
           if (this.app.vault.getAbstractFileByPath(apath)) {
             fetched[md.id] = true;                              // 标记"已下过", 以后删了不再补
-            if (md.kind === "image") embeds += `\n![[${md.id}]]\n`;
+            // 公众号文章正文里已把图内嵌在原位(![[id]]) → 就别再堆到末尾了, 避免重复
+            if (md.kind === "image") { if (!body.includes(`![[${md.id}]]`)) embeds += `\n![[${md.id}]]\n`; }
             else {                                              // 文件/Excel: 链接, 显示原文件名
               const alias = String(md.name || md.id).replace(/[[\]|]/g, "_");
               embeds += `\n[[${md.id}|${alias}]]\n`;
