@@ -1,6 +1,7 @@
 // 离线卡密验证(Ed25519)。插件只内置【公钥】,私钥在作者手里,绝不进仓库。
 // 卡密格式: NBP1.<base64url(payloadJSON)>.<base64url(签名)>
-// payload: { id: string, iat: number, exp: number }  exp=0 表示永久, 否则为到期 unix 秒。
+// payload: { id: string, iat: number, exp: number }。库存卡可能在售出前签发，
+// 所以最终有效期由服务器根据付款记录校验；插件只离线验证卡密确属本产品。
 import { createPublicKey, verify as cryptoVerify } from "crypto";
 
 // 作者公钥(spki der, base64)。换密钥对时改这里。
@@ -52,9 +53,6 @@ export function verifyLicense(card: string): LicenseResult {
   } catch {
     return { valid: false, reason: "卡密损坏" };
   }
-  if (payload.exp && payload.exp > 0 && Date.now() / 1000 > payload.exp) {
-    return { valid: false, reason: "卡密已过期", payload };
-  }
   return { valid: true, payload };
 }
 
@@ -63,10 +61,5 @@ export function licenseStatusText(card: string): string {
   if (!card || !card.trim()) return "未激活(公众号付款后获得卡密)";
   const r = verifyLicense(card);
   if (!r.valid) return "❌ " + (r.reason ?? "无效");
-  if (r.payload && r.payload.exp > 0) {
-    const d = new Date(r.payload.exp * 1000);
-    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    return `✅ 已激活(${ymd} 到期)`;
-  }
-  return "✅ 已激活(永久)";
+  return "✅ 已激活（有效期以服务器付款记录为准）";
 }
