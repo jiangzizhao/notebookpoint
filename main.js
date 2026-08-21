@@ -247,9 +247,6 @@ function verifyLicense(card) {
   } catch {
     return { valid: false, reason: "\u5361\u5BC6\u635F\u574F" };
   }
-  if (payload.exp && payload.exp > 0 && Date.now() / 1e3 > payload.exp) {
-    return { valid: false, reason: "\u5361\u5BC6\u5DF2\u8FC7\u671F", payload };
-  }
   return { valid: true, payload };
 }
 function licenseStatusText(card) {
@@ -258,12 +255,7 @@ function licenseStatusText(card) {
   const r = verifyLicense(card);
   if (!r.valid)
     return "\u274C " + (r.reason ?? "\u65E0\u6548");
-  if (r.payload && r.payload.exp > 0) {
-    const d = new Date(r.payload.exp * 1e3);
-    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    return `\u2705 \u5DF2\u6FC0\u6D3B(${ymd} \u5230\u671F)`;
-  }
-  return "\u2705 \u5DF2\u6FC0\u6D3B(\u6C38\u4E45)";
+  return "\u2705 \u5DF2\u6FC0\u6D3B\uFF08\u6709\u6548\u671F\u4EE5\u670D\u52A1\u5668\u4ED8\u6B3E\u8BB0\u5F55\u4E3A\u51C6\uFF09";
 }
 
 // src/main.ts
